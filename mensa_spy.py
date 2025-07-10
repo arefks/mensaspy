@@ -1,37 +1,63 @@
 import os
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-import requests
 import datetime
+import requests
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+)
+from dotenv import load_dotenv
 
+# Load environment variables
+load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")  # Not used directly here, but useful if needed.
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hi! Send /menu to get today's Mensa menu.")
+# Define /start or /mensa command to show mensa list
+async def mensa_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("Institutes Viertel", callback_data='1779')],
+        [InlineKeyboardButton("Köln Sportpark Müngersdorf", callback_data='389')],
+        [InlineKeyboardButton("Köln Robert-Koch-Straße", callback_data='386')],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text('Bitte wähle eine Mensa:', reply_markup=reply_markup)
 
-async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Handle button clicks and fetch meals
+async def mensa_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    canteen_id = query.data
     today = datetime.date.today().isoformat()
-    url = f"https://openmensa.org/api/v2/canteens/1839/days/{today}/meals"
-    response = requests.get(url)
-    if response.status_code == 200:
+    url = f"https://openmensa.org/api/v2/canteens/{canteen_id}/days/{today}/meals"
+
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
         meals = response.json()
+
         if meals:
-            message = f"🍽️ Freiburg Mensa Menu for {today}:\n"
-            for meal in meals:
-                message += f"- {meal['category']}: {meal['name']}\n"
+            meal_texts = [
+                f"{meal['category']}: {meal['name']} ({meal['prices']['students']}€)"
+                for meal in meals
+            ]
+            text = "\n".join(meal_texts)
         else:
-            message = "There are no meals listed for today. 💤"
-    else:
-        message = "⚠️ Error retrieving the menu."
+            text = "Heute keine Speisen verfügbar."
 
-    await update.message.reply_text(message)
+    except Exception as e:
+        text = f"Fehler beim Abrufen des Mensaplans.\n{e}"
 
+    await query.edit_message_text(text=text)
+
+# Main bot initialization
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("menu", menu))
+    app.add_handler(CommandHandler("mensa", mensa_list))
+    app.add_handler(CallbackQueryHandler(mensa_callback))
 
     print("Bot is running...")
     app.run_polling()
