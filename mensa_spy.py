@@ -8,11 +8,8 @@ from telegram.ext import (
     CallbackQueryHandler,
     ContextTypes,
 )
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 
 # Define /start or /mensa command to show mensa list
 async def mensa_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
