@@ -9,15 +9,15 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# Get bot token from environment variables
+# --- Load Telegram Bot Token ---
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 
-# /start command handler to test bot responsiveness
+# --- /start command ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("Received /start command")
     await update.message.reply_text("✅ Bot is working. Use /mensa to see Mensa options.")
 
-# /mensa command handler to show mensa list
+# --- /mensa command ---
 async def mensa_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print("Received /mensa command")
     keyboard = [
@@ -29,7 +29,7 @@ async def mensa_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text('Bitte wähle eine Mensa:', reply_markup=reply_markup)
 
-# CallbackQuery handler for button clicks to fetch meals
+# --- Mensa selection handler ---
 async def mensa_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -59,7 +59,7 @@ async def mensa_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_text(text=text)
 
-# Main bot initialization
+# --- Initialize bot ---
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
