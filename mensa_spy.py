@@ -185,7 +185,7 @@ async def send_meals(query, canteen_id, user_id, date=None):
     except Exception as e:
         text = (
             f"🍽 {name} — {date}\n\n"
-            "⚠️ Error fetching meals.\n{e}\n"
+            "⚠️ Error fetching meals.\n\n"
             "😐 Something went wrong, 😐!\n"
             "Either this canteen is closed today 😐, forgot to cook 😐, or the bot has a personal problem with you 😏.\n"
             "Try again tomorrow or pick another one!\n\n"
