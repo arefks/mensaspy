@@ -27,6 +27,21 @@ user_recent_canteens = {}  # user_id -> list of (name, id)
 user_last_date = {}        # user_id -> last viewed date per user
 user_reminders = {}        # user_id -> canteen_id
 
+# Logging state
+unique_users = set()
+total_interactions = 0
+
+# --------- Logging Helper ---------
+def log_usage(update: Update):
+    global total_interactions
+    user_id = update.effective_user.id if update.effective_user else None
+    username = update.effective_user.username if update.effective_user else None
+    if user_id:
+        unique_users.add(user_id)
+    total_interactions += 1
+    print(f"📊 Stats: {len(unique_users)} unique users, {total_interactions} total interactions | Latest: {username} ({user_id})")
+
+
 # --------- Fetch All Canteens ---------
 def fetch_canteens():
     print("📡 Fetching all canteens from OpenMensa...")
@@ -48,6 +63,7 @@ all_cities = sorted(set(c['city'] for c in all_canteens if c.get('city')))
 
 # --------- /start ---------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    log_usage(update)
     user_id = update.effective_user.id
     recent = user_recent_canteens.get(user_id, [])
 
@@ -74,10 +90,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --------- /help ---------
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    log_usage(update)
     await start(update, context)
 
 # --------- Inline Search ---------
 async def inline_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    log_usage(update)
     query = update.inline_query.query.lower()
     results = []
 
@@ -103,6 +121,7 @@ async def inline_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --------- /searchcity [City] ---------
 async def searchcity_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    log_usage(update)
     if not context.args:
         await update.message.reply_text("❌ Please provide a city name. Example: /searchcity Berlin")
         return
@@ -123,6 +142,7 @@ async def searchcity_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # --------- /remind [canteen_id] ---------
 async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    log_usage(update)
     user_id = update.effective_user.id
 
     if not context.args:
@@ -142,6 +162,7 @@ async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --------- Handle Canteen Clicks ---------
 async def canteen_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    log_usage(update)
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
