@@ -16,6 +16,13 @@ from telegram.ext import (
 from dotenv import load_dotenv
 import nest_asyncio
 from pathlib import Path
+from zoneinfo import ZoneInfo
+from datetime import time as dtime
+
+# ---------- Timezone ----------
+BERLIN_TZ = ZoneInfo("Europe/Berlin")
+def berlin_today():
+    return datetime.datetime.now(BERLIN_TZ).date()
 
 # Load token from .env
 dotenv_path = Path(__file__).parent / ".env"
@@ -140,22 +147,51 @@ async def searchcity_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await update.message.reply_text(f"🍽 Canteens in {city.title()}:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# --------- /remind [canteen_id] ---------
+# --------- Reminders (Europe/Berlin @ 09:30 Mon–Fri) ---------
+async def reminder_job(context: ContextTypes.DEFAULT_TYPE):
+    # Runs at 09:30 Europe/Berlin by job queue
+    data = context.job.data or {}
+    user_id = data.get("user_id")
+    canteen_id = data.get("canteen_id")
+    if not user_id or not canteen_id:
+        return
+    await send_meals_direct(context.application, user_id, canteen_id, date=berlin_today())
+
 async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_usage(update)
     user_id = update.effective_user.id
 
+    # Helper: cancel existing job(s) for this user
+    def cancel_existing_jobs():
+        jobs = context.job_queue.get_jobs_by_name(f"remind_{user_id}")
+        for j in jobs:
+            j.schedule_removal()
+
     if not context.args:
         user_reminders.pop(user_id, None)
+        cancel_existing_jobs()
         await update.message.reply_text("🔕 Reminder disabled.")
         return
 
     try:
         canteen_id = int(context.args[0])
         canteen = next(c for c in all_canteens if c['id'] == canteen_id)
+
+        # Save chosen canteen
         user_reminders[user_id] = canteen_id
+
+        # Cancel previous job (if any) and schedule a new one in Berlin time
+        cancel_existing_jobs()
+        context.job_queue.run_daily(
+            reminder_job,
+            time=dtime(hour=9, minute=30, tzinfo=BERLIN_TZ),
+            days=(0, 1, 2, 3, 4),  # Mon–Fri
+            name=f"remind_{user_id}",
+            data={"user_id": user_id, "canteen_id": canteen_id},
+        )
+
         await update.message.reply_text(
-            f"⏰ Daily reminder set for {canteen['name']} ({canteen['city']}) at 9:30am (Mon–Fri)."
+            f"⏰ Daily reminder set for {canteen['name']} ({canteen['city']}) at 9:30am (Mon–Fri, Europe/Berlin)."
         )
     except:
         await update.message.reply_text("❌ Invalid canteen ID.")
@@ -170,20 +206,20 @@ async def canteen_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     if data.startswith("canteen_"):
         canteen_id = int(data.split("_")[1])
-        user_last_date[user_id] = datetime.date.today()
+        user_last_date[user_id] = berlin_today()
         await send_meals(query, canteen_id, user_id)
 
     elif data.startswith("nextday_"):
         canteen_id = int(data.split("_")[1])
-        current = user_last_date.get(user_id, datetime.date.today())
+        current = user_last_date.get(user_id, berlin_today())
         next_day = current + datetime.timedelta(days=1)
         user_last_date[user_id] = next_day
         await send_meals(query, canteen_id, user_id, date=next_day)
 
-# --------- Send Meals ---------
+# --------- Send Meals (reply to a message) ---------
 async def send_meals(query, canteen_id, user_id, date=None):
     if date is None:
-        date = datetime.date.today()
+        date = berlin_today()
 
     url = f"https://openmensa.org/api/v2/canteens/{canteen_id}/days/{date.isoformat()}/meals"
     name = next((c['name'] for c in all_canteens if c['id'] == canteen_id), f"Mensa {canteen_id}")
@@ -224,6 +260,38 @@ async def send_meals(query, canteen_id, user_id, date=None):
     keyboard = [[InlineKeyboardButton("➡️ Next Day", callback_data=f"nextday_{canteen_id}")]]
     await query.message.reply_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard))
 
+# --------- Send Meals (direct message, used by reminders) ---------
+async def send_meals_direct(application, chat_id, canteen_id, date=None):
+    if date is None:
+        date = berlin_today()
+
+    url = f"https://openmensa.org/api/v2/canteens/{canteen_id}/days/{date.isoformat()}/meals"
+    name = next((c['name'] for c in all_canteens if c['id'] == canteen_id), f"Mensa {canteen_id}")
+    city = next((c['city'] for c in all_canteens if c['id'] == canteen_id), "Unknown")
+
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        meals = response.json()
+
+        if meals:
+            meal_texts = [
+                f"{meal['category']}: {meal['name']} ({meal['prices']['students']}€)"
+                for meal in meals
+            ]
+            text = f"⏰ Daily reminder\n\n🍽 {name} (ID: {canteen_id}, {city}) — {date}\n\n" + "\n".join(meal_texts)
+        else:
+            text = f"⏰ Daily reminder\n\n🍽 {name} (ID: {canteen_id}, {city}) — {date}\nNo meals available today."
+
+    except Exception:
+        text = (
+            f"⏰ Daily reminder\n\n🍽 {name} — {date}\n\n"
+            "⚠️ Error fetching meals. Try again later or pick another canteen."
+        )
+
+    keyboard = [[InlineKeyboardButton("➡️ Next Day", callback_data=f"nextday_{canteen_id}")]]
+    await application.bot.send_message(chat_id=chat_id, text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+
 # --------- Run Bot ---------
 async def run_bot():
     app = ApplicationBuilder().token(TOKEN).build()
@@ -234,7 +302,7 @@ async def run_bot():
     app.add_handler(CallbackQueryHandler(canteen_callback))
     app.add_handler(InlineQueryHandler(inline_search))
 
-    print("🚀 findmensabot is running...")
+    print("🚀 findmensabot is running (Europe/Berlin timers enabled)...")
     await app.run_polling()
 
 # --------- Entry Point ---------
